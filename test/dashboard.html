@@ -191,8 +191,10 @@ const T0 = shift ? shiftWindow(shift)[0]
                  : ((D.events||[]).length ? Math.min(...D.events.map(e=>+new Date(e.time))) : 0);
 const T1 = +new Date(D.generated_at);
 const LABEL_HE={morning:'בוקר',afternoon:'צהריים',night:'לילה'};
+// seconds in the "updated" stamp = the visible heartbeat of the silent auto-refresh
+const updClock = new Date(T1).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 document.getElementById('subtitle').textContent = shift
-  ? `משמרת ${LABEL_HE[shift.shift_label]||shift.shift_label} (${shift.shift_name}) · ${shift.shift_date} · עודכן ${fmtClock(T1)} · מתרענן אוטומטית` : '';
+  ? `משמרת ${LABEL_HE[shift.shift_label]||shift.shift_label} (${shift.shift_name}) · ${shift.shift_date} · עודכן ${updClock} · מתרענן אוטומטית` : '';
 
 // KPIs
 const counts={running:0,stopped:0,gray:0,unknown:0};
