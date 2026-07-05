@@ -32,15 +32,48 @@
   .counts .gr{ color:var(--gray); font-weight:700; }
   .longest{ margin-top:4px; font-size:12px; color:var(--muted); min-height:15px; }
   #err{ display:none; padding:14px 16px; color:#fca5a5; font-size:14px; }
-  /* station sheet */
-  #sheet{ position:fixed; inset:0; background:var(--bg); transform:translateY(100%);
-          transition:transform .22s ease; overflow-y:auto; z-index:10; }
-  #sheet.open{ transform:translateY(0); }
-  #sheet .top{ position:sticky; top:0; background:var(--bg); padding:14px 16px;
+  #allbtn, #repbtn{ display:block; width:calc(100% - 28px); margin:0 14px 12px; padding:14px;
+           background:var(--card); border:1px solid var(--line); border-radius:14px;
+           color:var(--txt); font-size:16px; font-weight:700; }
+  #repbtn{ margin-bottom:22px; }
+  /* station sheet + shift report + machine card */
+  #sheet, #mcard, #report{ position:fixed; inset:0; background:var(--bg); transform:translateY(100%);
+          transition:transform .22s ease; overflow-y:auto; }
+  #sheet{ z-index:10; } #report{ z-index:15; } #mcard{ z-index:20; }
+  #sheet.open, #mcard.open, #report.open{ transform:translateY(0); }
+  /* shift report controls + rows */
+  .repctl{ display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px; align-items:center;
+           border-bottom:1px solid var(--line); color:var(--muted); font-size:13px; }
+  .repctl input[type=date]{ background:var(--card); color:var(--txt); border:1px solid var(--line);
+           border-radius:8px; padding:7px 8px; font-size:14px; }
+  .repctl button{ background:var(--card); color:var(--txt); border:1px solid var(--line);
+           border-radius:8px; padding:7px 12px; font-size:13px; }
+  .repctl button.on{ background:#2563eb; border-color:#2563eb; }
+  #rep-note{ padding:10px 16px 4px; color:var(--muted); font-size:13px; }
+  .rrow{ padding:10px 16px 9px; border-bottom:1px solid var(--line); }
+  .rrow .rl{ display:flex; align-items:baseline; gap:8px; font-size:13px; margin-bottom:5px; }
+  .rrow .rl b{ font-size:14px; }
+  .rstrip{ position:relative; height:14px; border-radius:4px; background:var(--card);
+           overflow:hidden; direction:ltr; }
+  .rstrip div{ position:absolute; top:0; height:100%; }
+  .top{ position:sticky; top:0; background:var(--bg); padding:14px 16px;
                display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
-  #sheet .top h2{ margin:0; font-size:18px; flex:1; }
-  #back{ border:1px solid var(--line); background:var(--card); color:var(--txt);
+  .top h2{ margin:0; font-size:18px; flex:1; }
+  #back, #back2, #back3{ border:1px solid var(--line); background:var(--card); color:var(--txt);
          border-radius:10px; padding:8px 14px; font-size:15px; }
+  /* machine card body */
+  #mcard .body{ padding:14px 16px; }
+  .mstate{ font-size:19px; font-weight:800; margin:4px 0 2px; }
+  .msince{ color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .sec{ color:var(--muted); font-size:12px; margin-top:12px; }
+  .tl{ position:relative; height:20px; border-radius:5px; background:var(--card);
+       overflow:hidden; direction:ltr; margin:6px 0 3px; }
+  .tl div{ position:absolute; top:0; height:100%; }
+  .tl-lbl{ display:flex; justify-content:space-between; color:var(--muted); font-size:11px;
+           direction:ltr; }
+  table.hist{ width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  .hist th, .hist td{ padding:9px 5px; text-align:right; border-bottom:1px solid var(--line); }
+  .hist th{ color:var(--muted); font-weight:400; font-size:12px; }
   .mrow{ display:flex; align-items:center; gap:10px; padding:13px 16px;
          border-bottom:1px solid var(--line); font-size:16px; }
   .dot{ width:12px; height:12px; border-radius:50%; flex:none; }
@@ -58,10 +91,29 @@
 <div id="totals"></div>
 <div id="err"></div>
 <div id="grid"></div>
+<button id="allbtn" onclick="openSheet('ALL')">📋 כל המכונות — לפי זמן עמידה</button>
+<button id="repbtn" onclick="openReport()">🗓️ דוח משמרת — כל המדים, כולל היסטוריה</button>
+
+<div id="report">
+  <div class="top"><button id="back3" onclick="closeReport()">→ חזרה</button><h2>דוח משמרת</h2></div>
+  <div class="repctl">
+    <input type="date" id="rep-date">
+    <button data-sh="morning">בוקר</button><button data-sh="afternoon">צהריים</button><button data-sh="night">לילה</button>
+    <span style="flex-basis:100%"></span>
+    מיון: <button data-srt="id" class="on">לפי מספר 1-64</button><button data-srt="stop">הכי הרבה עצרו</button>
+  </div>
+  <div id="rep-note"></div>
+  <div id="rep-list"></div>
+</div>
 
 <div id="sheet">
   <div class="top"><button id="back" onclick="closeSheet()">→ חזרה</button><h2 id="sh-title"></h2></div>
   <div id="sh-list"></div>
+</div>
+
+<div id="mcard">
+  <div class="top"><button id="back2" onclick="closeMachine()">→ חזרה</button><h2 id="mc-title"></h2></div>
+  <div class="body" id="mc-body"></div>
 </div>
 
 <script src="supabase-data.js"></script>
@@ -80,9 +132,24 @@ function fmtDur(s){
   return `${s}שנ׳`;
 }
 function clockOf(iso){ const m = /T(\d\d:\d\d:\d\d)/.exec(iso||''); return m ? m[1] : ''; }
+function dateOf(iso){ const d = iso ? new Date(iso) : null; return d ? `${d.getDate()}/${d.getMonth()+1}` : ''; }
+// state -> color+label; a machine broken >24h shows gray with the DATE it stopped
+function stateInfo(m){
+  if (m.reason === 'broken')
+    return { c: 'var(--gray)', label: `מושבתת מאז ${dateOf(m.since)}`, noDur: true };
+  if (m.state === 'running') return { c: 'var(--run)', label: 'עובדת' };
+  if (m.state === 'stopped') return { c: 'var(--stop)', label: 'עומדת' };
+  return { c: 'var(--gray)', label: 'מנוטרלת' };
+}
+// event color on strips: the broken machine's long stop is drawn gray, not red
+function evColor(id, e, startMs){
+  const bs = (D.broken || {})[id];
+  if (e.state === 'stopped' && bs && startMs >= bs - 1000) return 'var(--gray)';
+  return e.state === 'running' ? 'var(--run)' : e.state === 'stopped' ? 'var(--stop)' : '#94a3b8';
+}
 
 function stationStats(st){
-  const ids = D.stations[st] || [];
+  const ids = st === 'ALL' ? D.machines.map(m => m.conveyor_id) : (D.stations[st] || []);
   const ms = D.machines.filter(m => ids.includes(m.conveyor_id));
   const run = ms.filter(m => m.state === 'running');
   const stop = ms.filter(m => m.state === 'stopped');
@@ -123,19 +190,86 @@ function renderSheet(st){
   const rows = [...s.ms].sort((a, b) =>
     (order[a.state] ?? 1) - (order[b.state] ?? 1) || b.duration_s - a.duration_s);
   document.getElementById('sh-title').textContent =
-    `עמדה ${st} — ${s.run.length} עובדות · ${s.stop.length} עומדות`;
+    `${st === 'ALL' ? 'כל המכונות' : 'עמדה ' + st} — ${s.run.length} עובדות · ${s.stop.length} עומדות`;
   document.getElementById('sh-list').innerHTML = rows.map(m => {
     const b = bucket[m.conveyor_id];
     const stopsToday = b ? `${b.stop_count} עצירות במשמרת · עמדה סה״כ ${fmtDur(b.stop_s)}` : '';
-    const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
-    const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
-    return `<div class="mrow">
-      <span class="dot" style="background:${c}"></span>
-      <span class="mid">#${m.conveyor_id}</span>
-      <span class="mtxt"><span class="mdur" style="color:${c}">${label} ${fmtDur(m.duration_s)}</span>
+    const si = stateInfo(m);
+    return `<div class="mrow" onclick="openMachine(${m.conveyor_id})">
+      <span class="dot" style="background:${si.c}"></span>
+      <span class="mid">#${m.conveyor_id}${st === 'ALL' ? ` <span style="color:var(--muted);font-weight:400;font-size:12px">${m.station}</span>` : ''}</span>
+      <span class="mtxt"><span class="mdur" style="color:${si.c}">${si.label}${si.noDur ? '' : ' ' + fmtDur(m.duration_s)}</span>
         <div class="msub">${stopsToday}</div></span>
+      <span style="color:var(--muted)">‹</span>
     </div>`;
   }).join('');
+}
+
+// --- machine drill-down: current state + 24h strip + per-shift history -------
+const LBL_HE = { morning: 'בוקר', afternoon: 'צהריים', night: 'לילה' };
+function openMachine(id){
+  const m = D.machines.find(x => x.conveyor_id === id);
+  if (!m) return;
+  const si = stateInfo(m);
+  const c = si.c, label = si.label;
+  document.getElementById('mc-title').textContent = `מכונה #${id} · עמדה ${m.station}`;
+
+  const hist = D.shifts.map(s => {
+    const b = s.machines.find(x => x.conveyor_id === id);
+    return b ? { date: s.shift_date, label: s.shift_label, ...b } : null;
+  }).filter(Boolean).reverse();
+  const histRows = hist.map(h => {
+    const uc = h.util > 0.85 ? 'var(--run)' : h.util > 0.7 ? '#f59e0b' : 'var(--stop)';
+    return `<tr><td>${h.date.slice(8,10)}/${h.date.slice(5,7)} ${LBL_HE[h.label]||h.label}</td>
+      <td><b style="color:${uc}">${(h.util*100).toFixed(0)}%</b></td>
+      <td>${fmtDur(h.run_s)}</td><td>${fmtDur(h.stop_s)}</td><td>${h.stop_count}</td></tr>`;
+  }).join('');
+
+  document.getElementById('mc-body').innerHTML = `
+    <div class="mstate" style="color:${c}">● ${label}${si.noDur ? '' : ' ' + fmtDur(m.duration_s)}</div>
+    <div class="msince">מאז ${m.reason === 'broken' ? dateOf(m.since) + ' ' : ''}${(clockOf(m.since) || '').slice(0,5) || '—'}</div>
+    <div class="sec">24 השעות האחרונות:</div>
+    <div class="tl" id="mc-tl"></div>
+    <div class="tl-lbl"><span id="mc-t0"></span><span id="mc-t1"></span></div>
+    <div class="sec">היסטוריית משמרות:</div>
+    <table class="hist">
+      <tr><th>משמרת</th><th>ניצולת</th><th>עבדה</th><th>עמדה</th><th>עצירות</th></tr>
+      ${histRows || '<tr><td colspan="5" class="muted">אין עדיין היסטוריה</td></tr>'}
+    </table>`;
+  document.getElementById('mcard').classList.add('open');
+  loadTimeline(id).catch(() => {});
+}
+function closeMachine(){ document.getElementById('mcard').classList.remove('open'); }
+
+async function loadTimeline(id){
+  const t1 = Date.parse(D.generated_at), t0 = t1 - 24 * 3600 * 1000;
+  const pad = n => String(n).padStart(2, '0');
+  const d0 = new Date(t0);
+  const isoLocal = `${d0.getFullYear()}-${pad(d0.getMonth()+1)}-${pad(d0.getDate())}T${pad(d0.getHours())}:${pad(d0.getMinutes())}:00`;
+  const H = { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY };
+  const strip = s => (s || '').replace(/(\.\d+)?(\+00:00|Z)$/, '$1');
+  const base = SUPA_URL + '/rest/v1/events?select=time,state,reason&conveyor_id=eq.' + id;
+  const [evR, priorR] = await Promise.all([
+    fetch(`${base}&time=gte.${isoLocal}&order=time&limit=2000`, { headers: H }),
+    fetch(`${base}&time=lt.${isoLocal}&order=time.desc&limit=1`, { headers: H }),
+  ]);
+  const ev = (await evR.json()).map(e => ({ ...e, time: strip(e.time) }));
+  const prior = await priorR.json();
+  if (prior.length) ev.unshift({ ...prior[0], time: isoLocal });
+
+  const el = document.getElementById('mc-tl');
+  if (!el) return;
+  const span = t1 - t0;
+  let html = '';
+  for (let i = 0; i < ev.length; i++) {
+    const a = Math.max(t0, Date.parse(ev[i].time));
+    const b = Math.min(t1, i + 1 < ev.length ? Date.parse(ev[i + 1].time) : t1);
+    if (b <= a) continue;
+    html += `<div style="left:${(a - t0) / span * 100}%;width:${(b - a) / span * 100}%;background:${evColor(id, ev[i], a)}"></div>`;
+  }
+  el.innerHTML = html;
+  document.getElementById('mc-t0').textContent = new Date(t0).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('mc-t1').textContent = new Date(t1).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
 }
 
 function openSheet(st){ openStationId = st; renderSheet(st); document.getElementById('sheet').classList.add('open'); }
@@ -157,7 +291,113 @@ async function refresh(){
 refresh();
 setInterval(refresh, REFRESH_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+// --- shift report: calendar + shift picker, full-shift strip per machine -----
+let repDate = null, repShift = null, repSort = 'id';
+const REP_HOURS = { morning: 6, afternoon: 14, night: 22 };
+const REP_LBL = { morning: 'בוקר 06:00–14:00', afternoon: 'צהריים 14:00–22:00', night: 'לילה 22:00–06:00' };
+const evCache = {};
+
+function openReport(){
+  if (!repDate) {                              // default: the CURRENT shift
+    const last = D.shifts[D.shifts.length - 1];
+    repDate = last ? last.shift_date : (D.generated_at || '').slice(0, 10);
+    repShift = last ? last.shift_label : 'morning';
+  }
+  document.getElementById('rep-date').value = repDate;
+  document.getElementById('report').classList.add('open');
+  renderReport();
+}
+function closeReport(){ document.getElementById('report').classList.remove('open'); }
+
+document.getElementById('rep-date').onchange = e => { repDate = e.target.value; renderReport(); };
+document.querySelectorAll('.repctl [data-sh]').forEach(b => b.onclick = () => { repShift = b.dataset.sh; renderReport(); });
+document.querySelectorAll('.repctl [data-srt]').forEach(b => b.onclick = () => { repSort = b.dataset.srt; renderReport(); });
+
+const _wallstrip = s => (s || '').replace(/(\.\d+)?(\+00:00|Z)$/, '$1');
+const _isoLocal = t => { const d = new Date(t), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`; };
+
+async function fetchWindowEvents(t0, t1){
+  const key = t0 + '|' + t1;
+  if (evCache[key]) return evCache[key];
+  const H = { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY };
+  let out = [], from = 0;
+  for (;;) {
+    const r = await fetch(`${SUPA_URL}/rest/v1/events?select=time,conveyor_id,state,reason` +
+      `&time=gte.${_isoLocal(t0)}&time=lt.${_isoLocal(t1)}&order=time&limit=1000&offset=${from}`, { headers: H });
+    const chunk = await r.json();
+    out = out.concat(chunk);
+    if (chunk.length < 1000 || from > 20000) break;
+    from += 1000;
+  }
+  out.forEach(e => { e.time = _wallstrip(e.time); });
+  evCache[key] = out;
+  return out;
+}
+
+async function renderReport(){
+  document.querySelectorAll('.repctl [data-sh]').forEach(b => b.classList.toggle('on', b.dataset.sh === repShift));
+  document.querySelectorAll('.repctl [data-srt]').forEach(b => b.classList.toggle('on', b.dataset.srt === repSort));
+  const note = document.getElementById('rep-note'), list = document.getElementById('rep-list');
+
+  const sh = D.shifts.find(s => s.shift_date === repDate && s.shift_label === repShift);
+  if (!sh) { note.textContent = 'אין נתונים למשמרת הזו (המערכת אוספת נתונים מ-02/07/2026)'; list.innerHTML = ''; return; }
+
+  const p = repDate.split('-').map(Number);
+  const t0 = new Date(p[0], p[1] - 1, p[2], REP_HOURS[repShift], 0, 0).getTime();
+  const t1 = Math.min(t0 + 8 * 3600 * 1000, Date.parse(D.generated_at));
+  note.textContent = `${REP_LBL[repShift]} · ${repDate} — טוען מדים…`;
+
+  const bucket = {}; sh.machines.forEach(b => { bucket[b.conveyor_id] = b; });
+  let ids = Object.keys(bucket).map(Number);
+  ids = repSort === 'stop' ? ids.sort((a, b) => bucket[b].stop_s - bucket[a].stop_s)
+                           : ids.sort((a, b) => a - b);
+
+  // rows appear immediately with the numbers; the strips fill in when events arrive
+  list.innerHTML = ids.map(id => {
+    const b = bucket[id];
+    const uc = b.util > 0.85 ? 'var(--run)' : b.util > 0.7 ? '#f59e0b' : 'var(--stop)';
+    return `<div class="rrow" onclick="openMachine(${id})">
+      <div class="rl"><b>#${id}</b><span style="color:var(--muted)">${b.station}</span>
+        <span style="color:${uc};font-weight:700">${(b.util * 100).toFixed(0)}%</span>
+        <span style="color:var(--muted)">עמדה ${fmtDur(b.stop_s)} · ${b.stop_count} עצ׳</span></div>
+      <div class="rstrip" id="rs-${id}"></div>
+    </div>`;
+  }).join('');
+
+  const ev = await fetchWindowEvents(t0 - 12 * 3600 * 1000, t1);   // lookback covers leading state
+  const byM = {};
+  ev.forEach(e => { (byM[e.conveyor_id] ||= []).push(e); });
+  const span = t1 - t0;
+
+  ids.forEach(id => {
+    const el = document.getElementById('rs-' + id);
+    if (!el) return;
+    const all = byM[id] || [];
+    let lead = null;
+    for (const e of all) { if (Date.parse(e.time) <= t0) lead = e; else break; }
+    const evs = all.filter(e => Date.parse(e.time) > t0);
+    if (lead) evs.unshift({ ...lead, _t: t0 });
+    else if (!evs.length) {
+      // silent machine: if its CURRENT state started before the window, it spans it all
+      const m = D.machines.find(x => x.conveyor_id === id);
+      if (m && m.since && Date.parse(m.since) <= t0) evs.push({ state: m.state, reason: m.reason, _t: t0 });
+    }
+    let html = '';
+    for (let i = 0; i < evs.length; i++) {
+      const a = Math.max(t0, evs[i]._t != null ? evs[i]._t : Date.parse(evs[i].time));
+      const b2 = Math.min(t1, i + 1 < evs.length ? Date.parse(evs[i + 1].time) : t1);
+      if (b2 <= a) continue;
+      html += `<div style="left:${(a - t0) / span * 100}%;width:${(b2 - a) / span * 100}%;background:${evColor(id, evs[i], a)}"></div>`;
+    }
+    el.innerHTML = html;
+  });
+  note.textContent = `${REP_LBL[repShift]} · ${repDate} · ${ids.length} מכונות (לחיצה על מכונה — הכרטיס שלה)`;
+}
+
 window.openSheet = openSheet; window.closeSheet = closeSheet;
+window.openMachine = openMachine; window.closeMachine = closeMachine;
+window.openReport = openReport; window.closeReport = closeReport;
 </script>
 </body>
 </html>
