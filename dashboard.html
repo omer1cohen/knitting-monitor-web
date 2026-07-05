@@ -191,8 +191,10 @@ const T0 = shift ? shiftWindow(shift)[0]
                  : ((D.events||[]).length ? Math.min(...D.events.map(e=>+new Date(e.time))) : 0);
 const T1 = +new Date(D.generated_at);
 const LABEL_HE={morning:'בוקר',afternoon:'צהריים',night:'לילה'};
+// seconds in the "updated" stamp = the visible heartbeat of the silent auto-refresh
+const updClock = new Date(T1).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 document.getElementById('subtitle').textContent = shift
-  ? `משמרת ${LABEL_HE[shift.shift_label]||shift.shift_label} (${shift.shift_name}) · ${shift.shift_date} · עודכן ${fmtClock(T1)} · מתרענן אוטומטית` : '';
+  ? `משמרת ${LABEL_HE[shift.shift_label]||shift.shift_label} (${shift.shift_name}) · ${shift.shift_date} · עודכן ${updClock} · מתרענן אוטומטית` : '';
 
 // KPIs
 const counts={running:0,stopped:0,gray:0,unknown:0};
@@ -508,21 +510,43 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
     document.getElementById('tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
 });
 
-// restore the tab that was active before the auto-refresh
+// --- seamless auto-refresh: come back to the EXACT same spot -----------------
 const store = { get(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } },
                 set(k,v){ try{ sessionStorage.setItem(k,v); }catch(e){} } };
+// restore the tab that was active before the refresh
 const savedTab = store.get('activeTab');
 if (savedTab && savedTab !== 'live') {
   const tb = [...document.querySelectorAll('.tabs button')].find(x => x.dataset.tab === savedTab);
   if (tb) tb.click();
 }
+// restore the chosen sort
+const savedSort = store.get('mSort');
+if (savedSort && savedSort !== mSort &&
+    document.querySelector(`.sortbar button[data-sort="${savedSort}"]`)) {
+  mSort = savedSort;
+  document.querySelectorAll('.sortbar button').forEach(x =>
+    x.classList.toggle('active', x.dataset.sort === savedSort));
+  renderMachines();
+}
+// restore scroll positions (vertical page + horizontal 3-day strip)
+const _sy = parseFloat(store.get('scrollY') || '0');
+if (_sy > 0) window.scrollTo(0, _sy);
+const _sx = parseFloat(store.get('mScrollX') || '0');
+const _msc = document.getElementById('m-scroll');
+if (_sx > 0 && _msc) _msc.scrollLeft = _sx;
+
 // auto-refresh every 60s -- so the "current shift" flips at 06/14/22 on its own.
 // Skipped while a machine/station card is open or the browser tab is hidden.
+// Before reloading we save exactly where the user is; on boot we restore it.
 setInterval(() => {
   if (document.hidden) return;
   if (document.getElementById('overlay').classList.contains('show')) return;
   const active = document.querySelector('.tabs button.active');
   store.set('activeTab', active ? active.dataset.tab : 'live');
+  store.set('mSort', mSort);
+  store.set('scrollY', String(window.scrollY || 0));
+  const msc = document.getElementById('m-scroll');
+  if (msc) store.set('mScrollX', String(msc.scrollLeft || 0));
   location.reload();
 }, 60000);
 
