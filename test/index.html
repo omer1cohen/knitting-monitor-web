@@ -32,15 +32,32 @@
   .counts .gr{ color:var(--gray); font-weight:700; }
   .longest{ margin-top:4px; font-size:12px; color:var(--muted); min-height:15px; }
   #err{ display:none; padding:14px 16px; color:#fca5a5; font-size:14px; }
-  /* station sheet */
-  #sheet{ position:fixed; inset:0; background:var(--bg); transform:translateY(100%);
-          transition:transform .22s ease; overflow-y:auto; z-index:10; }
-  #sheet.open{ transform:translateY(0); }
-  #sheet .top{ position:sticky; top:0; background:var(--bg); padding:14px 16px;
+  #allbtn{ display:block; width:calc(100% - 28px); margin:0 14px 22px; padding:14px;
+           background:var(--card); border:1px solid var(--line); border-radius:14px;
+           color:var(--txt); font-size:16px; font-weight:700; }
+  /* station sheet + machine card */
+  #sheet, #mcard{ position:fixed; inset:0; background:var(--bg); transform:translateY(100%);
+          transition:transform .22s ease; overflow-y:auto; }
+  #sheet{ z-index:10; } #mcard{ z-index:20; }
+  #sheet.open, #mcard.open{ transform:translateY(0); }
+  .top{ position:sticky; top:0; background:var(--bg); padding:14px 16px;
                display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
-  #sheet .top h2{ margin:0; font-size:18px; flex:1; }
-  #back{ border:1px solid var(--line); background:var(--card); color:var(--txt);
+  .top h2{ margin:0; font-size:18px; flex:1; }
+  #back, #back2{ border:1px solid var(--line); background:var(--card); color:var(--txt);
          border-radius:10px; padding:8px 14px; font-size:15px; }
+  /* machine card body */
+  #mcard .body{ padding:14px 16px; }
+  .mstate{ font-size:19px; font-weight:800; margin:4px 0 2px; }
+  .msince{ color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .sec{ color:var(--muted); font-size:12px; margin-top:12px; }
+  .tl{ position:relative; height:20px; border-radius:5px; background:var(--card);
+       overflow:hidden; direction:ltr; margin:6px 0 3px; }
+  .tl div{ position:absolute; top:0; height:100%; }
+  .tl-lbl{ display:flex; justify-content:space-between; color:var(--muted); font-size:11px;
+           direction:ltr; }
+  table.hist{ width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  .hist th, .hist td{ padding:9px 5px; text-align:right; border-bottom:1px solid var(--line); }
+  .hist th{ color:var(--muted); font-weight:400; font-size:12px; }
   .mrow{ display:flex; align-items:center; gap:10px; padding:13px 16px;
          border-bottom:1px solid var(--line); font-size:16px; }
   .dot{ width:12px; height:12px; border-radius:50%; flex:none; }
@@ -58,10 +75,16 @@
 <div id="totals"></div>
 <div id="err"></div>
 <div id="grid"></div>
+<button id="allbtn" onclick="openSheet('ALL')">📋 כל המכונות — לפי זמן עמידה</button>
 
 <div id="sheet">
   <div class="top"><button id="back" onclick="closeSheet()">→ חזרה</button><h2 id="sh-title"></h2></div>
   <div id="sh-list"></div>
+</div>
+
+<div id="mcard">
+  <div class="top"><button id="back2" onclick="closeMachine()">→ חזרה</button><h2 id="mc-title"></h2></div>
+  <div class="body" id="mc-body"></div>
 </div>
 
 <script src="supabase-data.js"></script>
@@ -82,7 +105,7 @@ function fmtDur(s){
 function clockOf(iso){ const m = /T(\d\d:\d\d:\d\d)/.exec(iso||''); return m ? m[1] : ''; }
 
 function stationStats(st){
-  const ids = D.stations[st] || [];
+  const ids = st === 'ALL' ? D.machines.map(m => m.conveyor_id) : (D.stations[st] || []);
   const ms = D.machines.filter(m => ids.includes(m.conveyor_id));
   const run = ms.filter(m => m.state === 'running');
   const stop = ms.filter(m => m.state === 'stopped');
@@ -123,19 +146,88 @@ function renderSheet(st){
   const rows = [...s.ms].sort((a, b) =>
     (order[a.state] ?? 1) - (order[b.state] ?? 1) || b.duration_s - a.duration_s);
   document.getElementById('sh-title').textContent =
-    `עמדה ${st} — ${s.run.length} עובדות · ${s.stop.length} עומדות`;
+    `${st === 'ALL' ? 'כל המכונות' : 'עמדה ' + st} — ${s.run.length} עובדות · ${s.stop.length} עומדות`;
   document.getElementById('sh-list').innerHTML = rows.map(m => {
     const b = bucket[m.conveyor_id];
     const stopsToday = b ? `${b.stop_count} עצירות במשמרת · עמדה סה״כ ${fmtDur(b.stop_s)}` : '';
     const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
     const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
-    return `<div class="mrow">
+    return `<div class="mrow" onclick="openMachine(${m.conveyor_id})">
       <span class="dot" style="background:${c}"></span>
-      <span class="mid">#${m.conveyor_id}</span>
+      <span class="mid">#${m.conveyor_id}${st === 'ALL' ? ` <span style="color:var(--muted);font-weight:400;font-size:12px">${m.station}</span>` : ''}</span>
       <span class="mtxt"><span class="mdur" style="color:${c}">${label} ${fmtDur(m.duration_s)}</span>
         <div class="msub">${stopsToday}</div></span>
+      <span style="color:var(--muted)">‹</span>
     </div>`;
   }).join('');
+}
+
+// --- machine drill-down: current state + 24h strip + per-shift history -------
+const LBL_HE = { morning: 'בוקר', afternoon: 'צהריים', night: 'לילה' };
+function openMachine(id){
+  const m = D.machines.find(x => x.conveyor_id === id);
+  if (!m) return;
+  const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
+  const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
+  document.getElementById('mc-title').textContent = `מכונה #${id} · עמדה ${m.station}`;
+
+  const hist = D.shifts.map(s => {
+    const b = s.machines.find(x => x.conveyor_id === id);
+    return b ? { date: s.shift_date, label: s.shift_label, ...b } : null;
+  }).filter(Boolean).reverse();
+  const histRows = hist.map(h => {
+    const uc = h.util > 0.85 ? 'var(--run)' : h.util > 0.7 ? '#f59e0b' : 'var(--stop)';
+    return `<tr><td>${h.date.slice(8,10)}/${h.date.slice(5,7)} ${LBL_HE[h.label]||h.label}</td>
+      <td><b style="color:${uc}">${(h.util*100).toFixed(0)}%</b></td>
+      <td>${fmtDur(h.run_s)}</td><td>${fmtDur(h.stop_s)}</td><td>${h.stop_count}</td></tr>`;
+  }).join('');
+
+  document.getElementById('mc-body').innerHTML = `
+    <div class="mstate" style="color:${c}">● ${label} ${fmtDur(m.duration_s)}</div>
+    <div class="msince">מאז ${(clockOf(m.since) || '').slice(0,5) || '—'}</div>
+    <div class="sec">24 השעות האחרונות:</div>
+    <div class="tl" id="mc-tl"></div>
+    <div class="tl-lbl"><span id="mc-t0"></span><span id="mc-t1"></span></div>
+    <div class="sec">היסטוריית משמרות:</div>
+    <table class="hist">
+      <tr><th>משמרת</th><th>ניצולת</th><th>עבדה</th><th>עמדה</th><th>עצירות</th></tr>
+      ${histRows || '<tr><td colspan="5" class="muted">אין עדיין היסטוריה</td></tr>'}
+    </table>`;
+  document.getElementById('mcard').classList.add('open');
+  loadTimeline(id).catch(() => {});
+}
+function closeMachine(){ document.getElementById('mcard').classList.remove('open'); }
+
+async function loadTimeline(id){
+  const t1 = Date.parse(D.generated_at), t0 = t1 - 24 * 3600 * 1000;
+  const pad = n => String(n).padStart(2, '0');
+  const d0 = new Date(t0);
+  const isoLocal = `${d0.getFullYear()}-${pad(d0.getMonth()+1)}-${pad(d0.getDate())}T${pad(d0.getHours())}:${pad(d0.getMinutes())}:00`;
+  const H = { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY };
+  const strip = s => (s || '').replace(/(\.\d+)?(\+00:00|Z)$/, '$1');
+  const base = SUPA_URL + '/rest/v1/events?select=time,state,reason&conveyor_id=eq.' + id;
+  const [evR, priorR] = await Promise.all([
+    fetch(`${base}&time=gte.${isoLocal}&order=time&limit=2000`, { headers: H }),
+    fetch(`${base}&time=lt.${isoLocal}&order=time.desc&limit=1`, { headers: H }),
+  ]);
+  const ev = (await evR.json()).map(e => ({ ...e, time: strip(e.time) }));
+  const prior = await priorR.json();
+  if (prior.length) ev.unshift({ ...prior[0], time: isoLocal });
+
+  const el = document.getElementById('mc-tl');
+  if (!el) return;
+  const span = t1 - t0;
+  const col = e => e.state === 'running' ? 'var(--run)' : e.state === 'stopped' ? 'var(--stop)' : '#94a3b8';
+  let html = '';
+  for (let i = 0; i < ev.length; i++) {
+    const a = Math.max(t0, Date.parse(ev[i].time));
+    const b = Math.min(t1, i + 1 < ev.length ? Date.parse(ev[i + 1].time) : t1);
+    if (b <= a) continue;
+    html += `<div style="left:${(a - t0) / span * 100}%;width:${(b - a) / span * 100}%;background:${col(ev[i])}"></div>`;
+  }
+  el.innerHTML = html;
+  document.getElementById('mc-t0').textContent = new Date(t0).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('mc-t1').textContent = new Date(t1).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
 }
 
 function openSheet(st){ openStationId = st; renderSheet(st); document.getElementById('sheet').classList.add('open'); }
@@ -158,6 +250,7 @@ refresh();
 setInterval(refresh, REFRESH_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 window.openSheet = openSheet; window.closeSheet = closeSheet;
+window.openMachine = openMachine; window.closeMachine = closeMachine;
 </script>
 </body>
 </html>
