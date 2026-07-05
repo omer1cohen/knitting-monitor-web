@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ניטור סריגה — תצוגה מקדימה</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --card2:#243449; --txt:#e2e8f0; --muted:#94a3b8;
+    --run:#22c55e; --stop:#ef4444; --g-power:#64748b; --g-station:#f59e0b; --g-gap:#cbd5e1; --unknown:#475569;
+    --line:#334155;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI',Arial,sans-serif;font-size:14px}
+  header{padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:baseline;gap:14px}
+  header h1{margin:0;font-size:18px}
+  header .sub{color:var(--muted);font-size:13px}
+  .wrap{padding:18px 20px;max-width:1200px;margin:0 auto}
+  .kpis{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px}
+  .kpi .n{font-size:26px;font-weight:700}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px}
+  .kpi.big .n{font-size:30px}
+  .tabs{display:flex;gap:6px;margin:6px 0 16px}
+  .tabs button{background:var(--card);color:var(--txt);border:1px solid var(--line);padding:8px 16px;border-radius:10px;cursor:pointer;font-size:14px}
+  .tabs button.active{background:#2563eb;border-color:#2563eb}
+  .statedot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-inline-end:6px;vertical-align:middle}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:18px}
+  .card h2{margin:0 0 12px;font-size:15px;font-weight:600}
+  .muted{color:var(--muted)}
+  /* grid */
+  .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:7px}
+  .cell{border-radius:8px;padding:8px 4px;text-align:center;color:#0b1220;font-weight:700;position:relative;min-height:46px;display:flex;flex-direction:column;justify-content:center;cursor:pointer;transition:transform .08s}
+  .cell:hover{transform:scale(1.06);outline:2px solid #fff}
+  .cell .num{font-size:15px}
+  .cell .dur{font-size:10px;font-weight:600;opacity:.85}
+  .cell .st{position:absolute;top:3px;left:5px;font-size:9px;opacity:.7;font-weight:700}
+  /* station bars */
+  .stbar{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .stbar .lbl{width:90px;color:var(--muted)}
+  .stbar .track{flex:1;background:var(--card2);border-radius:6px;height:18px;overflow:hidden}
+  .stbar .fill{height:100%;background:var(--run)}
+  .stbar .val{width:48px;text-align:left;font-weight:700}
+  /* per-station summary cards */
+  .stcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+  .stcard{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;transition:transform .08s}
+  .stcard:hover{transform:translateY(-2px);border-color:#2563eb}
+  .stcard .h{font-weight:700;margin-bottom:6px}
+  .stcard .bar{height:8px;border-radius:4px;background:var(--bg);overflow:hidden;margin:8px 0}
+  .stcard .bar div{height:100%}
+  .stcard .row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:3px 0}
+  .stcard .row b{color:var(--txt)}
+  /* 24h shift report cards */
+  .shiftcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .shiftcard{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;transition:transform .08s}
+  .shiftcard:hover{transform:translateY(-2px);border-color:#2563eb}
+  .shiftcard .h{font-size:16px;font-weight:700}
+  .shiftcard .when{color:var(--muted);font-size:12px;margin-bottom:8px}
+  .shiftcard .util{font-size:34px;font-weight:800;line-height:1}
+  .shiftcard .row{display:flex;justify-content:space-between;font-size:13px;margin:5px 0}
+  .shiftcard .gmini{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg);margin-top:8px}
+  .shiftcard .ststrip{display:flex;gap:4px;margin-top:10px}
+  .shiftcard .ststrip .s{flex:1;text-align:center;background:var(--bg);border-radius:6px;padding:4px 2px;font-size:11px}
+  /* gray breakdown */
+  .gbar{display:flex;height:26px;border-radius:8px;overflow:hidden;margin:8px 0;background:var(--card2)}
+  .gbar div{display:flex;align-items:center;justify-content:center;font-size:11px;color:#0b1220;font-weight:700}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:12px;height:12px;border-radius:3px;display:inline-block}
+  /* combined machines list: info + timeline together, one row per machine */
+  .sortbar{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px;margin-bottom:10px;flex-wrap:wrap}
+  .sortbar button{background:var(--card2);color:var(--txt);border:1px solid var(--line);padding:4px 10px;border-radius:8px;cursor:pointer;font-size:12px}
+  .sortbar button.active{background:#2563eb;border-color:#2563eb}
+  .viewbar{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px;margin-bottom:8px}
+  .viewbar select{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:13px;max-width:100%}
+  #m-scroll{overflow-x:auto}
+  #m-inner{min-width:100%}
+  #m-inner.wide .minfo{position:sticky;right:0;background:var(--card);z-index:2}
+  .m-axis{display:grid;grid-template-columns:370px 1fr;gap:12px;margin-bottom:6px}
+  .m-axis .ax{position:relative;height:14px;color:var(--muted);font-size:11px;direction:ltr}
+  .ax span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+  .mrow{display:grid;grid-template-columns:370px 1fr;gap:12px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .mrow:hover{background:var(--card2)}
+  .minfo{display:flex;align-items:center;gap:8px;font-size:12px;overflow:hidden;white-space:nowrap}
+  .minfo .mid{font-weight:700;min-width:34px}
+  .stbadge{background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:11px}
+  .pill{padding:1px 8px;border-radius:20px;font-weight:700;color:#0b1220;min-width:42px;text-align:center}
+  .tl-track{position:relative;display:flex;height:16px;border-radius:3px;overflow:hidden;background:var(--card2);direction:ltr}
+  .tl-seg{height:100%}
+  .gl{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18);pointer-events:none;z-index:1}
+  /* machine modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;padding:30px 14px;z-index:50;overflow:auto}
+  .overlay.show{display:flex}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;max-width:780px;width:100%;padding:20px}
+  .modal .x{float:left;cursor:pointer;color:var(--muted);font-size:22px;line-height:1;border:none;background:none}
+  .modal h2{margin:0 0 4px}
+  .mkpis{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+  .mkpi{background:var(--card2);border-radius:10px;padding:10px 14px;min-width:90px}
+  .mkpi .n{font-size:20px;font-weight:700}
+  .mkpi .l{color:var(--muted);font-size:11px}
+  .mtl{position:relative;display:flex;height:22px;border-radius:4px;overflow:hidden;background:var(--card2);margin:6px 0;direction:ltr}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line)}
+  th{color:var(--muted)}
+  .badge{padding:1px 8px;border-radius:20px;font-size:11px;font-weight:700;color:#0b1220}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧶 ניטור סריגה — זמן עבודה/עמידה</h1>
+  <span class="sub" id="subtitle"></span>
+  <span class="sub" style="margin-inline-start:auto">תצוגה מקדימה · נתוני סימולציה</span>
+</header>
+<div class="wrap">
+  <div class="kpis" id="kpis"></div>
+  <div class="tabs">
+    <button data-tab="live" class="active">תצוגה חיה</button>
+    <button data-tab="machines">מכונות — דוח + ציר זמן</button>
+    <button data-tab="shifts">דוח 24 שעות</button>
+  </div>
+
+  <div id="tab-live">
+    <div class="card"><h2>סיכום לפי עמדה — לחיצה פותחת את דוח העמדה</h2><div id="stations"></div></div>
+    <div class="card"><h2>סטטוס 64 המכונות עכשיו (לחיצה לפרטי מכונה)</h2><div class="grid" id="grid"></div>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--run)"></i> עובדת (זמן רצף)</span>
+        <span><i class="dot" style="background:var(--stop)"></i> עומדת (זמן)</span>
+        <span><i class="dot" style="background:var(--g-power)"></i> חשמל</span>
+        <span><i class="dot" style="background:var(--g-station)"></i> עמדה ננטשה</span>
+        <span><i class="dot" style="background:var(--g-gap)"></i> חור-דאטה</span>
+      </div>
+    </div>
+    <div class="card"><h2>זמן מת מנוטרל (אפור) — לא נספר בניצולת</h2><div id="gray"></div></div>
+  </div>
+
+  <div id="tab-machines" class="hidden">
+    <div class="card"><h2>סיכום לפי עמדה (משמרת נוכחית)</h2><div class="stcards" id="stations-machines"></div></div>
+    <div class="card">
+      <h2>כל מכונה — נתונים + ציר זמן יחד (לחיצה לפרטים)</h2>
+      <div class="viewbar">תקופה: <select id="viewsel"></select></div>
+      <div class="sortbar">מיון:
+        <button data-sort="stop_s" class="active">זמן עמידה</button>
+        <button data-sort="stop_count">מס׳ עצירות</button>
+        <button data-sort="stutter_count" title="חלונות של 15 שנ׳ בלי תנועה שלא הפכו לעצירה מלאה — מכונה שעוצרת-מתניעה הרבה">⚡ גמגומים</button>
+        <button data-sort="station">עמדה</button>
+        <button data-sort="conveyor_id">מס׳ מכונה</button>
+      </div>
+      <div id="m-scroll"><div id="m-inner">
+        <div class="m-axis"><div></div><div class="ax" id="m-axis-ax"></div></div>
+        <div id="machines-list"></div>
+      </div></div>
+    </div>
+  </div>
+
+  <div id="tab-shifts" class="hidden">
+    <div class="card"><h2>דוח 24 שעות — כל המשמרות בתמונה אחת</h2>
+      <div class="shiftcards" id="shiftcards"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+
+<script src="supabase-data.js"></script>
+<script>
+window.__SUPA = { url: 'https://gjdhfrlksymuvvosrymk.supabase.co', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqZGhmcmxrc3ltdXZ2b3NyeW1rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NDI5NjUsImV4cCI6MjA5ODIxODk2NX0.57u4FRy0WmclcDik32PrKWJY0tq_FwH8DGnns0h_Fuc' };
+async function __boot(){
+const D = window.SNAPSHOT || await buildSnapshotFromSupabase(window.__SUPA.url, window.__SUPA.key);
+const COLORS = {running:'#22c55e', stopped:'#ef4444', unknown:'#475569',
+  power:'#64748b', station:'#f59e0b', gap:'#cbd5e1'};
+function colorOf(state, reason){
+  if(state==='running') return COLORS.running;
+  if(state==='stopped') return COLORS.stopped;
+  if(state==='gray') return COLORS[reason] || COLORS.gap;
+  return COLORS.unknown;
+}
+function fmtDur(s){ s=Math.round(s||0); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  if(h) return h+':'+String(m).padStart(2,'0')+' ש׳'; if(m) return m+' דק׳'; return s+' ש׳'; }
+function pct(x){ return (x*100).toFixed(1)+'%'; }
+const REASON_HE={power:'הפסקת חשמל',station:'עמדה ננטשה',gap:'חור-דאטה'};
+const STATE_HE={running:'עובדת',stopped:'עומדת',gray:'מנוטרל',unknown:'—'};
+function fmtClock(t){ return new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}); }
+const shift = D.shifts[D.shifts.length-1] || null;
+function shiftWindow(s){ const p=s.shift_date.split('-').map(Number);
+  const h = s.shift_label==='morning'?6 : s.shift_label==='afternoon'?14 : 22;
+  const start=new Date(p[0],p[1]-1,p[2],h,0,0).getTime(); return [start, start+8*3600*1000]; }
+const SHIFT_WINDOW={morning:'06:00–14:00',afternoon:'14:00–22:00',night:'22:00–06:00'};
+// current-shift window — timelines & streaks below are scoped to the live shift
+const T0 = shift ? shiftWindow(shift)[0]
+                 : ((D.events||[]).length ? Math.min(...D.events.map(e=>+new Date(e.time))) : 0);
+const T1 = +new Date(D.generated_at);
+const LABEL_HE={morning:'בוקר',afternoon:'צהריים',night:'לילה'};
+document.getElementById('subtitle').textContent = shift
+  ? `משמרת ${LABEL_HE[shift.shift_label]||shift.shift_label} (${shift.shift_name}) · ${shift.shift_date} · עודכן ${fmtClock(T1)} · מתרענן אוטומטית` : '';
+
+// KPIs
+const counts={running:0,stopped:0,gray:0,unknown:0};
+D.machines.forEach(m=>counts[m.state]=(counts[m.state]||0)+1);
+const kpis=[
+  {n:counts.running, l:'עובדות עכשיו', c:'var(--run)'},
+  {n:counts.stopped, l:'עומדות עכשיו', c:'var(--stop)'},
+  {n:counts.gray, l:'מנוטרלות (אפור)', c:'var(--g-station)'},
+  {n: shift?pct(shift.util):'—', l:'ניצולת המשמרת', c:'#60a5fa', big:true},
+  {n: shift?fmtDur(shift.stop_s):'—', l:'זמן עמידה (משמרת)', c:'var(--stop)'},
+  {n: shift?shift.stops:'—', l:'מס׳ עצירות', c:'var(--muted)'},
+];
+document.getElementById('kpis').innerHTML = kpis.map(k=>
+  `<div class="kpi ${k.big?'big':''}"><div class="n" style="color:${k.c}">${k.n}</div><div class="l">${k.l}</div></div>`).join('');
+
+// Live grid
+const byId={}; D.machines.forEach(m=>byId[m.conveyor_id]=m);
+let g='';
+for(let i=1;i<=D.n_conveyors;i++){
+  const m=byId[i]||{state:'unknown',station:'',duration_s:0};
+  const reasonTxt = m.state==='gray' ? (REASON_HE[m.reason]||'') : '';
+  const label = m.state==='unknown' ? '' : fmtDur(m.duration_s);
+  const sinceTxt = m.since ? ` (מאז ${fmtClock(+new Date(m.since))})` : '';
+  const tip = m.state==='running' ? `עובדת ברצף ${fmtDur(m.duration_s)}${sinceTxt}`
+            : m.state==='stopped' ? `עומדת ${fmtDur(m.duration_s)}${sinceTxt}`
+            : `${reasonTxt} · ${fmtDur(m.duration_s)}${sinceTxt}`;
+  g+=`<div class="cell" onclick="openMachine(${i})" style="background:${colorOf(m.state,m.reason)}" title="מכונה ${i} · עמדה ${m.station} · ${tip}">
+      <span class="st">${m.station}</span><span class="num">${i}</span><span class="dur">${label}</span></div>`;
+}
+document.getElementById('grid').innerHTML=g;
+
+// Per-station summary (live counts + shift aggregates), shown in BOTH tabs
+function stationAgg(){
+  const labels = D.stations ? Object.keys(D.stations) : ['A','B','C','D'];
+  const agg={};
+  labels.forEach(s=>agg[s]={count:(D.stations&&D.stations[s]?D.stations[s].length:0),
+    run:0,stop:0,gray:0,stops:0,work_now:0,stop_now:0,gray_now:0});
+  if(shift) shift.machines.forEach(m=>{ const a=agg[m.station]; if(!a)return;
+    a.run+=m.run_s; a.stop+=m.stop_s; a.gray+=m.gray_s; a.stops+=m.stop_count; });
+  D.machines.forEach(m=>{ const a=agg[m.station]; if(!a)return;
+    if(m.state==='running')a.work_now++; else if(m.state==='stopped')a.stop_now++; else if(m.state==='gray')a.gray_now++; });
+  Object.values(agg).forEach(a=>a.util=(a.run+a.stop)>0?a.run/(a.run+a.stop):1);
+  return agg;
+}
+function stationCardsHTML(){
+  const agg=stationAgg();
+  return ['A','B','C','D'].filter(s=>agg[s]&&agg[s].count>0).map(s=>{
+    const a=agg[s], col=a.util>0.85?'var(--run)':(a.util>0.7?'#f59e0b':'var(--stop)');
+    return `<div class="stcard" onclick="openStation('${s}')">
+      <div class="h">עמדה ${s} <span class="muted" style="font-weight:400">· ${a.count} מכונות</span></div>
+      <div class="bar"><div style="width:${(a.util*100).toFixed(0)}%;background:${col}"></div></div>
+      <div class="row"><span>ניצולת</span><b style="color:${col}">${(a.util*100).toFixed(0)}%</b></div>
+      <div class="row"><span>עכשיו</span><b>🟢 ${a.work_now} · 🔴 ${a.stop_now}${a.gray_now?' · ⚪ '+a.gray_now:''}</b></div>
+      <div class="row"><span>זמן עמידה</span><b>${fmtDur(a.stop)}</b></div>
+      <div class="row"><span>עצירות</span><b>${a.stops}</b></div>
+    </div>`;
+  }).join('');
+}
+document.getElementById('stations').innerHTML = `<div class="stcards">${stationCardsHTML()}</div>`;
+const _sm=document.getElementById('stations-machines'); if(_sm) _sm.innerHTML=stationCardsHTML();
+
+// Gray breakdown
+if(shift){
+  const gp=shift.gray_power_s, gs=shift.gray_station_s, gg=shift.gray_gap_s, tot=gp+gs+gg;
+  const seg=(v,c)=> tot>0&&v>0 ? `<div style="width:${(v/tot*100).toFixed(1)}%;background:${c}">${fmtDur(v)}</div>`:'';
+  document.getElementById('gray').innerHTML =
+    `<div class="gbar">${seg(gp,COLORS.power)}${seg(gs,COLORS.station)}${seg(gg,COLORS.gap)}${tot===0?'<div style="color:var(--muted);width:100%;background:transparent">אין זמן מנוטרל</div>':''}</div>
+     <div class="legend">
+       <span><i class="dot" style="background:${COLORS.power}"></i> חשמל ${fmtDur(gp)}</span>
+       <span><i class="dot" style="background:${COLORS.station}"></i> עמדה ננטשה ${fmtDur(gs)}</span>
+       <span><i class="dot" style="background:${COLORS.gap}"></i> חור-דאטה ${fmtDur(gg)}</span>
+     </div>`;
+}
+
+// machine's state segments, clamped to a window [t0,t1] (defaults: current shift)
+function machineSegs(id, t0=T0, t1=T1){
+  const ev=(D.events||[]).filter(e=>e.conveyor_id===id).sort((a,b)=>new Date(a.time)-new Date(b.time));
+  const out=[];
+  for(let i=0;i<ev.length;i++){
+    let start=+new Date(ev[i].time), end=i+1<ev.length?+new Date(ev[i+1].time):t1;
+    start=Math.max(start,t0); end=Math.min(end,t1);
+    if(end<=start) continue;
+    out.push({state:ev[i].state, reason:ev[i].reason, start, end, dur:(end-start)/1000});
+  }
+  return out;
+}
+function machineSegments(id, t0=T0, t1=T1){
+  const span=Math.max(1,t1-t0);
+  // absolutely positioned: a period with no data stays visibly EMPTY on the track
+  return machineSegs(id,t0,t1).map(s=>
+    `<div class="tl-seg" style="position:absolute;top:0;height:100%;left:${(s.start-t0)/span*100}%;width:${(s.end-s.start)/span*100}%;background:${colorOf(s.state,s.reason)}"
+      title="${fmtClock(s.start)}–${fmtClock(s.end)} · ${STATE_HE[s.state]}${s.reason?(' ('+REASON_HE[s.reason]+')'):''}"></div>`
+  ).join('');
+}
+// longest uninterrupted run (worked without a fault) in the window
+function longestRun(id, t0=T0, t1=T1){
+  let best=0;
+  machineSegs(id,t0,t1).forEach(s=>{ if(s.state==='running') best=Math.max(best,s.dur); });
+  return best;
+}
+
+// one machine row: info + its timeline (window defaults to the current shift)
+function machineRowHTML(m, t0=T0, t1=T1, sidx){
+  const u=m.util, col=u>0.85?'var(--run)':(u>0.7?'#f59e0b':'var(--stop)');
+  const click = (sidx==null) ? `openMachine(${m.conveyor_id})` : `openMachine(${m.conveyor_id},${sidx})`;
+  const live = (sidx==null) ? byId[m.conveyor_id] : null;   // current state dot (live view only)
+  const dot = live ? `<span class="statedot" title="${STATE_HE[live.state]||''} עכשיו" style="background:${colorOf(live.state,live.reason)}"></span>` : '';
+  return `<div class="mrow" onclick="${click}">
+      <div class="minfo">
+        ${dot}<span class="mid">#${m.conveyor_id}</span><span class="stbadge">${m.station}</span>
+        <span class="pill" title="ניצולת — אחוז זמן העבודה מתוך הזמן הזמין בתקופה" style="background:${col}">ניצולת ${(u*100).toFixed(0)}%</span>
+        <span class="muted" title="רצף העבודה הכי ארוך בלי תקלה">🟢 רצף ${fmtDur(longestRun(m.conveyor_id,t0,t1))}</span>
+        <span class="muted">· עמד ${fmtDur(m.stop_s)} · ${m.stop_count} עצ׳</span>
+        ${(m.stutter_count||0) ? `<span class="muted" title="חלונות של 15 שנ׳ בלי תנועה שלא הפכו לעצירה מלאה">· ⚡${m.stutter_count}</span>` : ''}
+      </div>
+      <div class="tl-track">${machineSegments(m.conveyor_id,t0,t1)}${gridlinesHTML(t0,t1)}</div>
+    </div>`;
+}
+// whole-hour ticks across a window, as {pct,label}; label density adapts to span
+function hourTicks(t0,t1){
+  const span=Math.max(1,t1-t0); const hours=span/3600000;
+  const step = hours<=16?1 : hours<=30?2 : hours<=80?6 : 12;
+  const out=[]; const d=new Date(t0);
+  if(d.getMinutes()||d.getSeconds()||d.getMilliseconds()){ d.setMinutes(0,0,0); d.setHours(d.getHours()+1); }
+  while(d.getHours()%step!==0) d.setHours(d.getHours()+1);
+  for(let t=d.getTime(); t<=t1+1000; t+=step*3600000){
+    const dd=new Date(t);
+    const label = (step>1 && dd.getHours()===0) ? `${dd.getDate()}/${dd.getMonth()+1}` : fmtClock(t);
+    out.push({pct:(t-t0)/span*100, label});
+  }
+  return out;
+}
+function axisInnerHTML(t0,t1){ return hourTicks(t0,t1).map(k=>`<span style="left:${k.pct}%">${k.label}</span>`).join(''); }
+function axisHTML(t0,t1){ return `<div class="m-axis"><div></div><div class="ax">${axisInnerHTML(t0,t1)}</div></div>`; }
+function gridlinesHTML(t0,t1){ return hourTicks(t0,t1).map(k=>`<div class="gl" style="left:${k.pct}%"></div>`).join(''); }
+const AXIS_HTML = axisHTML(T0,T1);
+
+// Combined machines list (info + timeline together), driven by the period picker
+let mSort='stop_s';
+let mView={type:'shift', idx:D.shifts.length-1};
+function spanRows(){                       // one row per machine, summed over ALL shifts
+  const acc={};
+  D.shifts.forEach(s=>s.machines.forEach(b=>{
+    const a=(acc[b.conveyor_id] ||= {conveyor_id:b.conveyor_id, station:b.station,
+      run_s:0, stop_s:0, gray_s:0, stop_count:0, stutter_count:0});
+    a.run_s+=b.run_s; a.stop_s+=b.stop_s; a.gray_s+=b.gray_s;
+    a.stop_count+=b.stop_count; a.stutter_count+=b.stutter_count||0;
+  }));
+  return Object.values(acc).map(a=>({...a, util:(a.run_s+a.stop_s)>0?a.run_s/(a.run_s+a.stop_s):1}));
+}
+function currentView(){
+  if(mView.type==='span'){ const t1=T1, t0=t1-mView.hours*3600000;
+    return {rows:spanRows(), t0, t1, sidx:null, wide:true}; }
+  const idx=mView.idx, s=D.shifts[idx];
+  if(!s) return {rows:[], t0:0, t1:1, sidx:null, wide:false};
+  const win=shiftWindow(s), isCur = idx===D.shifts.length-1;
+  return {rows:[...s.machines], t0:win[0], t1:isCur?T1:win[1],
+          sidx:isCur?undefined:idx, wide:false};
+}
+function renderMachines(){
+  const v=currentView();
+  const inner=document.getElementById('m-inner');
+  inner.classList.toggle('wide', !!v.wide);
+  inner.style.width = v.wide ? Math.max(900,(v.t1-v.t0)/3600000*40)+'px' : '';
+  document.getElementById('m-axis-ax').innerHTML = axisInnerHTML(v.t0,v.t1);
+  if(!v.rows.length){ document.getElementById('machines-list').innerHTML='<div class="muted">אין נתוני משמרת</div>'; return; }
+  let rows=[...v.rows];
+  if(mSort==='conveyor_id') rows.sort((a,b)=>a.conveyor_id-b.conveyor_id);
+  else if(mSort==='stop_count') rows.sort((a,b)=>b.stop_count-a.stop_count);
+  else if(mSort==='stutter_count') rows.sort((a,b)=>(b.stutter_count||0)-(a.stutter_count||0));
+  else if(mSort==='station') rows.sort((a,b)=> a.station<b.station?-1 : a.station>b.station?1 : a.conveyor_id-b.conveyor_id);
+  else rows.sort((a,b)=>b.stop_s-a.stop_s);                          // most stop first
+  document.getElementById('machines-list').innerHTML =
+    rows.map(m=>machineRowHTML(m, v.t0, v.t1, v.sidx)).join('');
+}
+document.querySelectorAll('.sortbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.sortbar button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); mSort=b.dataset.sort; renderMachines();
+});
+// period picker: every shift we have (newest first) + a pannable 3-day strip
+const viewsel=document.getElementById('viewsel');
+viewsel.innerHTML = D.shifts.map((s,i)=>{
+  const cur = i===D.shifts.length-1;
+  const dd = s.shift_date.slice(8,10)+'/'+s.shift_date.slice(5,7);
+  return `<option value="${i}">${cur?'המשמרת הנוכחית — ':''}${LABEL_HE[s.shift_label]||s.shift_label} · ${dd}</option>`;
+}).reverse().join('') + `<option value="span72">היסטוריה רציפה — 3 ימים אחרונים (אפשר לגרור את המד)</option>`;
+viewsel.value = String(D.shifts.length-1);
+viewsel.onchange = () => {
+  mView = viewsel.value==='span72' ? {type:'span', hours:72} : {type:'shift', idx:+viewsel.value};
+  try{ sessionStorage.setItem('mView', viewsel.value); }catch(e){}
+  renderMachines();
+};
+let _savedView=null; try{ _savedView=sessionStorage.getItem('mView'); }catch(e){}
+if(_savedView!==null && (_savedView==='span72' || D.shifts[+_savedView])){ viewsel.value=_savedView; viewsel.onchange(); }
+else renderMachines();
+
+// Machine drill-down card (sidx = optional shift index; default = current/live shift)
+function openMachine(id, sidx){
+  const useShift = (sidx!=null) ? D.shifts[sidx] : shift;
+  const win = (sidx!=null && useShift) ? shiftWindow(useShift) : [T0,T1];
+  const t0=win[0], t1=win[1];
+  const m = byId[id] || {state:'unknown', station:'', duration_s:0};
+  const sm = useShift ? useShift.machines.find(x=>x.conveyor_id===id) : null;
+  const stops = machineSegs(id,t0,t1).filter(s=>s.state==='stopped'||s.state==='gray');
+  const stopRows = stops.length ? stops.map(s=>{
+    const cause = s.state==='gray' ? (REASON_HE[s.reason]||'מנוטרל') : 'עצירה';
+    return `<tr><td>${fmtClock(s.start)}</td><td>${fmtDur(s.dur)}</td>
+      <td><span class="badge" style="background:${colorOf(s.state,s.reason)}">${cause}</span></td></tr>`;
+  }).join('') : `<tr><td colspan="3" class="muted">אין עצירות</td></tr>`;
+  const hdrSince = m.since ? ` (מאז ${fmtClock(+new Date(m.since))})` : '';
+  const header = (sidx==null)
+    ? ( m.state==='running' ? `🟢 עובדת ברצף ${fmtDur(m.duration_s)}${hdrSince}`
+      : m.state==='stopped' ? `🔴 עומדת ${fmtDur(m.duration_s)}${hdrSince}`
+      : m.state==='gray'    ? `⚪ ${REASON_HE[m.reason]||'מנוטרל'} · ${fmtDur(m.duration_s)}${hdrSince}` : '—')
+    : `משמרת ${useShift.shift_name||useShift.shift_label} · ${SHIFT_WINDOW[useShift.shift_label]||''} · ${useShift.shift_date}`;
+  const kpis = sm ? `
+    <div class="mkpi"><div class="n" style="color:#60a5fa">${(sm.util*100).toFixed(0)}%</div><div class="l">ניצולת</div></div>
+    <div class="mkpi"><div class="n" style="color:var(--run)">${fmtDur(sm.run_s)}</div><div class="l">עבדה (סה״כ)</div></div>
+    <div class="mkpi"><div class="n" style="color:var(--run)">${fmtDur(longestRun(id,t0,t1))}</div><div class="l">רצף הכי ארוך בלי תקלה</div></div>
+    <div class="mkpi"><div class="n" style="color:var(--stop)">${fmtDur(sm.stop_s)}</div><div class="l">עמדה</div></div>
+    <div class="mkpi"><div class="n">${fmtDur(sm.gray_s)}</div><div class="l">מנוטרל</div></div>
+    <div class="mkpi"><div class="n">${sm.stop_count}</div><div class="l">עצירות</div></div>
+    <div class="mkpi" title="חלונות של 15 שנ׳ בלי תנועה שלא הפכו לעצירה מלאה — הרבה כאלה = עוצרת-מתניעה כל הזמן"><div class="n" style="color:#f59e0b">⚡${sm.stutter_count||0}</div><div class="l">גמגומים</div></div>` : '';
+  document.getElementById('modal').innerHTML = `
+    <button class="x" onclick="closeMachine()">✕</button>
+    <h2>מכונה #${id} <span class="muted" style="font-size:14px">· עמדה ${m.station}</span></h2>
+    <div class="muted">${header}</div>
+    <div class="mkpis">${kpis}</div>
+    <div class="muted" style="font-size:12px">ציר הזמן (${fmtClock(t0)}–${fmtClock(t1)})</div>
+    <div class="ax" style="position:relative;height:14px;direction:ltr;color:var(--muted);font-size:11px;margin-top:6px">${axisInnerHTML(t0,t1)}</div>
+    <div class="mtl">${machineSegments(id,t0,t1)}${gridlinesHTML(t0,t1)}</div>
+    <h3 style="margin:16px 0 6px;font-size:14px">כל העצירות</h3>
+    <table><thead><tr><th>שעה</th><th>משך</th><th>סיבה</th></tr></thead><tbody>${stopRows}</tbody></table>`;
+  document.getElementById('overlay').classList.add('show');
+}
+// Shift drill-down: full report of one shift (its machines + timelines, scoped to its hours)
+function openShift(idx){
+  const s=D.shifts[idx]; if(!s) return;
+  const win=shiftWindow(s), t0=win[0], t1=win[1];
+  const col=s.util>0.85?'var(--run)':(s.util>0.7?'#f59e0b':'var(--stop)');
+  const gtot=s.gray_power_s+s.gray_station_s+s.gray_gap_s;
+  const machines=[...s.machines].sort((a,b)=>b.stop_s-a.stop_s);
+  document.getElementById('modal').innerHTML = `
+    <button class="x" onclick="closeMachine()">✕</button>
+    <h2>משמרת ${s.shift_name||s.shift_label} <span class="muted" style="font-size:14px">· ${SHIFT_WINDOW[s.shift_label]||''} · ${s.shift_date}</span></h2>
+    <div class="mkpis">
+      <div class="mkpi"><div class="n" style="color:${col}">${(s.util*100).toFixed(0)}%</div><div class="l">ניצולת</div></div>
+      <div class="mkpi"><div class="n" style="color:var(--stop)">${fmtDur(s.stop_s)}</div><div class="l">זמן עמידה</div></div>
+      <div class="mkpi"><div class="n">${s.stops}</div><div class="l">עצירות</div></div>
+      <div class="mkpi"><div class="n">${fmtDur(gtot)}</div><div class="l">מנוטרל</div></div>
+    </div>
+    <div class="muted" style="font-size:12px;margin:10px 0 6px">מכונות המשמרת — נתונים + ציר זמן (לחיצה למכונה)</div>
+    ${axisHTML(t0,t1)}
+    ${machines.map(m=>machineRowHTML(m,t0,t1,idx)).join('')}`;
+  document.getElementById('overlay').classList.add('show');
+}
+// Station drill-down: full report of one station (its machines + their timelines)
+function openStation(label){
+  const a = stationAgg()[label] || {count:0,util:1,work_now:0,stop_now:0,stop:0,stops:0};
+  const machines=(shift?shift.machines:[]).filter(m=>m.station===label).sort((x,y)=>y.stop_s-x.stop_s);
+  const col=a.util>0.85?'var(--run)':(a.util>0.7?'#f59e0b':'var(--stop)');
+  document.getElementById('modal').innerHTML = `
+    <button class="x" onclick="closeMachine()">✕</button>
+    <h2>עמדה ${label} <span class="muted" style="font-size:14px">· ${a.count} מכונות</span></h2>
+    <div class="mkpis">
+      <div class="mkpi"><div class="n" style="color:${col}">${(a.util*100).toFixed(0)}%</div><div class="l">ניצולת</div></div>
+      <div class="mkpi"><div class="n">🟢 ${a.work_now} · 🔴 ${a.stop_now}</div><div class="l">עכשיו</div></div>
+      <div class="mkpi"><div class="n" style="color:var(--stop)">${fmtDur(a.stop)}</div><div class="l">זמן עמידה</div></div>
+      <div class="mkpi"><div class="n">${a.stops}</div><div class="l">עצירות</div></div>
+    </div>
+    <div class="muted" style="font-size:12px;margin:10px 0 6px">מכונות העמדה — נתונים + ציר זמן (לחיצה למכונה)</div>
+    ${AXIS_HTML}
+    ${machines.map(m=>machineRowHTML(m)).join('')}`;
+  document.getElementById('overlay').classList.add('show');
+}
+function closeMachine(){ document.getElementById('overlay').classList.remove('show'); }
+document.getElementById('overlay').onclick=(e)=>{ if(e.target.id==='overlay') closeMachine(); };
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeMachine(); });
+
+// 24h report: all shifts as cards (chronological), each clickable to its full report
+function renderShifts(){
+  const el=document.getElementById('shiftcards');
+  if(!D.shifts.length){ el.innerHTML='<div class="muted">אין נתוני משמרות</div>'; return; }
+  el.innerHTML=[...D.shifts].map((s,i)=>{
+    const col=s.util>0.85?'var(--run)':(s.util>0.7?'#f59e0b':'var(--stop)');
+    const gtot=s.gray_power_s+s.gray_station_s+s.gray_gap_s;
+    const gseg=(v,c)=> gtot>0&&v>0?`<div style="width:${(v/gtot*100).toFixed(0)}%;background:${c}"></div>`:'';
+    const st=['A','B','C','D'].filter(k=>s.per_station[k]).map(k=>{
+      const u=s.per_station[k].util, c=u>0.85?'var(--run)':(u>0.7?'#f59e0b':'var(--stop)');
+      return `<div class="s">${k}<br><b style="color:${c}">${(u*100).toFixed(0)}%</b></div>`;
+    }).join('');
+    return `<div class="shiftcard" onclick="openShift(${i})">
+      <div class="h">${s.shift_name||s.shift_label}</div>
+      <div class="when">${SHIFT_WINDOW[s.shift_label]||''} · ${s.shift_date}</div>
+      <div class="util" style="color:${col}">${(s.util*100).toFixed(0)}%</div>
+      <div class="muted" style="font-size:12px">ניצולת</div>
+      <div class="row" style="margin-top:10px"><span>זמן עמידה (כל המכונות)</span><b style="color:var(--stop)">${fmtDur(s.stop_s)}</b></div>
+      <div class="row"><span>מס׳ עצירות</span><b>${s.stops}</b></div>
+      <div class="row"><span>מנוטרל (אפור)</span><b>${fmtDur(gtot)}</b></div>
+      <div class="gmini">${gseg(s.gray_power_s,COLORS.power)}${gseg(s.gray_station_s,COLORS.station)}${gseg(s.gray_gap_s,COLORS.gap)}</div>
+      <div class="muted" style="font-size:10px;margin-top:4px">חשמל ${fmtDur(s.gray_power_s)} · עמדה ${fmtDur(s.gray_station_s)} · דאטה ${fmtDur(s.gray_gap_s)}</div>
+      <div class="ststrip">${st}</div>
+    </div>`;
+  }).join('');
+}
+renderShifts();
+
+// Tabs
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  ['live','machines','shifts'].forEach(t=>
+    document.getElementById('tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
+});
+
+// restore the tab that was active before the auto-refresh
+const store = { get(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } },
+                set(k,v){ try{ sessionStorage.setItem(k,v); }catch(e){} } };
+const savedTab = store.get('activeTab');
+if (savedTab && savedTab !== 'live') {
+  const tb = [...document.querySelectorAll('.tabs button')].find(x => x.dataset.tab === savedTab);
+  if (tb) tb.click();
+}
+// auto-refresh every 60s -- so the "current shift" flips at 06/14/22 on its own.
+// Skipped while a machine/station card is open or the browser tab is hidden.
+setInterval(() => {
+  if (document.hidden) return;
+  if (document.getElementById('overlay').classList.contains('show')) return;
+  const active = document.querySelector('.tabs button.active');
+  store.set('activeTab', active ? active.dataset.tab : 'live');
+  location.reload();
+}, 60000);
+
+window.openMachine=openMachine; window.openStation=openStation;
+window.openShift=openShift; window.closeMachine=closeMachine;
+} // end __boot
+__boot().catch(e=>{ document.body.insertAdjacentHTML('afterbegin',
+  '<p style="color:#fff;background:#b91c1c;padding:12px;margin:0">שגיאה בטעינת נתונים מהענן: '+e.message+'</p>'); });
+</script>
+</body>
+</html>

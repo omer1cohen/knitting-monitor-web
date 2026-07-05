@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>ניטור סריגה</title>
+<style>
+  :root{ --bg:#0b1220; --card:#111a2e; --line:#1e2a44; --txt:#e5edff; --muted:#8fa3c8;
+         --run:#22c55e; --stop:#ef4444; --gray:#64748b; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; background:var(--bg); color:var(--txt);
+        font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif; }
+  header{ padding:14px 16px 6px; display:flex; align-items:baseline; justify-content:space-between; }
+  header h1{ font-size:18px; margin:0; }
+  #upd{ color:var(--muted); font-size:12px; }
+  #totals{ padding:0 16px 10px; color:var(--muted); font-size:14px; }
+  #totals b.g{ color:var(--run); } #totals b.r{ color:var(--stop); }
+  #grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:0 14px 20px; }
+  .st{ position:relative; border-radius:18px; background:var(--card); border:1px solid var(--line);
+       padding:14px 10px 12px; text-align:center; cursor:pointer; user-select:none; }
+  .ring{ width:118px; height:118px; border-radius:50%; margin:0 auto;
+         display:flex; align-items:center; justify-content:center; }
+  .inner{ width:92px; height:92px; border-radius:50%; background:var(--card);
+          display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .inner .letter{ font-size:30px; font-weight:800; line-height:1; }
+  .inner .mini{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .counts{ margin-top:10px; font-size:14px; }
+  .counts .g{ color:var(--run); font-weight:700; } .counts .r{ color:var(--stop); font-weight:700; }
+  .counts .gr{ color:var(--gray); font-weight:700; }
+  .longest{ margin-top:4px; font-size:12px; color:var(--muted); min-height:15px; }
+  #err{ display:none; padding:14px 16px; color:#fca5a5; font-size:14px; }
+  /* station sheet */
+  #sheet{ position:fixed; inset:0; background:var(--bg); transform:translateY(100%);
+          transition:transform .22s ease; overflow-y:auto; z-index:10; }
+  #sheet.open{ transform:translateY(0); }
+  #sheet .top{ position:sticky; top:0; background:var(--bg); padding:14px 16px;
+               display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
+  #sheet .top h2{ margin:0; font-size:18px; flex:1; }
+  #back{ border:1px solid var(--line); background:var(--card); color:var(--txt);
+         border-radius:10px; padding:8px 14px; font-size:15px; }
+  .mrow{ display:flex; align-items:center; gap:10px; padding:13px 16px;
+         border-bottom:1px solid var(--line); font-size:16px; }
+  .dot{ width:12px; height:12px; border-radius:50%; flex:none; }
+  .mid{ font-weight:800; width:44px; }
+  .mtxt{ flex:1; }
+  .mdur{ font-weight:700; }
+  .msub{ color:var(--muted); font-size:12px; margin-top:1px; }
+  #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+            background:var(--bg); z-index:20; color:var(--muted); font-size:16px; }
+</style>
+</head>
+<body>
+<div id="loading">טוען נתונים מהמפעל…</div>
+<header><h1>🧶 ניטור סריגה</h1><span id="upd"></span></header>
+<div id="totals"></div>
+<div id="err"></div>
+<div id="grid"></div>
+
+<div id="sheet">
+  <div class="top"><button id="back" onclick="closeSheet()">→ חזרה</button><h2 id="sh-title"></h2></div>
+  <div id="sh-list"></div>
+</div>
+
+<script src="supabase-data.js"></script>
+<script>
+const SUPA_URL = 'https://gjdhfrlksymuvvosrymk.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqZGhmcmxrc3ltdXZ2b3NyeW1rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NDI5NjUsImV4cCI6MjA5ODIxODk2NX0.57u4FRy0WmclcDik32PrKWJY0tq_FwH8DGnns0h_Fuc';
+const REFRESH_MS = 45000;
+
+let D = null, openStationId = null;
+
+function fmtDur(s){
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  if (h > 0) return `${h}ש׳ ${m}ד׳`;
+  if (m > 0) return `${m}ד׳`;
+  return `${s}שנ׳`;
+}
+function clockOf(iso){ const m = /T(\d\d:\d\d:\d\d)/.exec(iso||''); return m ? m[1] : ''; }
+
+function stationStats(st){
+  const ids = D.stations[st] || [];
+  const ms = D.machines.filter(m => ids.includes(m.conveyor_id));
+  const run = ms.filter(m => m.state === 'running');
+  const stop = ms.filter(m => m.state === 'stopped');
+  const gray = ms.filter(m => m.state !== 'running' && m.state !== 'stopped');
+  const longest = stop.length ? Math.max(...stop.map(m => m.duration_s)) : 0;
+  return { ids, ms, run, stop, gray, longest };
+}
+
+function render(){
+  const stations = Object.keys(D.stations).sort();
+  let totR = 0, totS = 0;
+  document.getElementById('grid').innerHTML = stations.map(st => {
+    const s = stationStats(st);
+    totR += s.run.length; totS += s.stop.length;
+    const n = s.ms.length || 1;
+    const pRun = s.run.length / n * 100, pStop = s.stop.length / n * 100;
+    const ring = `conic-gradient(var(--run) 0 ${pRun}%, var(--stop) ${pRun}% ${pRun+pStop}%, var(--gray) ${pRun+pStop}% 100%)`;
+    return `<div class="st" onclick="openSheet('${st}')">
+      <div class="ring" style="background:${ring}"><div class="inner">
+        <div class="letter">${st}</div><div class="mini">${s.ms.length} מכונות</div>
+      </div></div>
+      <div class="counts"><span class="g">${s.run.length} עובדות</span> · <span class="r">${s.stop.length} עומדות</span>${s.gray.length ? ` · <span class="gr">${s.gray.length} מנוטרל</span>` : ''}</div>
+      <div class="longest">${s.stop.length ? `העומדת הכי הרבה: ${fmtDur(s.longest)}` : 'הכל עובד ✅'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('totals').innerHTML =
+    `כל המפעל: <b class="g">${totR} עובדות</b> · <b class="r">${totS} עומדות</b>`;
+  document.getElementById('upd').textContent = `עודכן ${clockOf(D.generated_at)}`;
+  if (openStationId) renderSheet(openStationId);   // keep an open sheet fresh
+}
+
+function renderSheet(st){
+  const s = stationStats(st);
+  const shift = D.shifts.length ? D.shifts[D.shifts.length - 1] : null;
+  const bucket = {};
+  if (shift) shift.machines.forEach(b => bucket[b.conveyor_id] = b);
+  const order = { stopped: 0, gray: 1, unknown: 1, running: 2 };
+  const rows = [...s.ms].sort((a, b) =>
+    (order[a.state] ?? 1) - (order[b.state] ?? 1) || b.duration_s - a.duration_s);
+  document.getElementById('sh-title').textContent =
+    `עמדה ${st} — ${s.run.length} עובדות · ${s.stop.length} עומדות`;
+  document.getElementById('sh-list').innerHTML = rows.map(m => {
+    const b = bucket[m.conveyor_id];
+    const stopsToday = b ? `${b.stop_count} עצירות במשמרת · עמדה סה״כ ${fmtDur(b.stop_s)}` : '';
+    const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
+    const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
+    return `<div class="mrow">
+      <span class="dot" style="background:${c}"></span>
+      <span class="mid">#${m.conveyor_id}</span>
+      <span class="mtxt"><span class="mdur" style="color:${c}">${label} ${fmtDur(m.duration_s)}</span>
+        <div class="msub">${stopsToday}</div></span>
+    </div>`;
+  }).join('');
+}
+
+function openSheet(st){ openStationId = st; renderSheet(st); document.getElementById('sheet').classList.add('open'); }
+function closeSheet(){ openStationId = null; document.getElementById('sheet').classList.remove('open'); }
+
+async function refresh(){
+  try {
+    D = await buildSnapshotFromSupabase(SUPA_URL, SUPA_KEY, null, { skipEvents: true });
+    document.getElementById('err').style.display = 'none';
+    render();
+  } catch (e) {
+    const el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = 'שגיאה בטעינה מהענן — בדוק אינטרנט. (' + e.message + ')';
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+refresh();
+setInterval(refresh, REFRESH_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+window.openSheet = openSheet; window.closeSheet = closeSheet;
+</script>
+</body>
+</html>
