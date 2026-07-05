@@ -168,7 +168,7 @@ window.__SUPA = { url: 'https://gjdhfrlksymuvvosrymk.supabase.co', key: 'eyJhbGc
 async function __boot(){
 const D = window.SNAPSHOT || await buildSnapshotFromSupabase(window.__SUPA.url, window.__SUPA.key);
 const COLORS = {running:'#22c55e', stopped:'#ef4444', unknown:'#475569',
-  power:'#64748b', station:'#f59e0b', gap:'#cbd5e1'};
+  power:'#64748b', station:'#f59e0b', gap:'#cbd5e1', broken:'#94a3b8'};
 function colorOf(state, reason){
   if(state==='running') return COLORS.running;
   if(state==='stopped') return COLORS.stopped;
@@ -178,7 +178,7 @@ function colorOf(state, reason){
 function fmtDur(s){ s=Math.round(s||0); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
   if(h) return h+':'+String(m).padStart(2,'0')+' ש׳'; if(m) return m+' דק׳'; return s+' ש׳'; }
 function pct(x){ return (x*100).toFixed(1)+'%'; }
-const REASON_HE={power:'הפסקת חשמל',station:'עמדה ננטשה',gap:'חור-דאטה'};
+const REASON_HE={power:'הפסקת חשמל',station:'עמדה ננטשה',gap:'חור-דאטה',broken:'מושבתת (מעל 24 שע׳)'};
 const STATE_HE={running:'עובדת',stopped:'עומדת',gray:'מנוטרל',unknown:'—'};
 function fmtClock(t){ return new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}); }
 const shift = D.shifts[D.shifts.length-1] || null;
@@ -216,7 +216,9 @@ let g='';
 for(let i=1;i<=D.n_conveyors;i++){
   const m=byId[i]||{state:'unknown',station:'',duration_s:0};
   const reasonTxt = m.state==='gray' ? (REASON_HE[m.reason]||'') : '';
-  const label = m.state==='unknown' ? '' : fmtDur(m.duration_s);
+  const _sd = m.since ? new Date(m.since) : null;
+  const label = m.state==='unknown' ? ''
+    : (m.reason==='broken' && _sd) ? `מאז ${_sd.getDate()}/${_sd.getMonth()+1}` : fmtDur(m.duration_s);
   const sinceTxt = m.since ? ` (מאז ${fmtClock(+new Date(m.since))})` : '';
   const tip = m.state==='running' ? `עובדת ברצף ${fmtDur(m.duration_s)}${sinceTxt}`
             : m.state==='stopped' ? `עומדת ${fmtDur(m.duration_s)}${sinceTxt}`
@@ -258,14 +260,16 @@ const _sm=document.getElementById('stations-machines'); if(_sm) _sm.innerHTML=st
 
 // Gray breakdown
 if(shift){
-  const gp=shift.gray_power_s, gs=shift.gray_station_s, gg=shift.gray_gap_s, tot=gp+gs+gg;
+  const gp=shift.gray_power_s, gs=shift.gray_station_s, gg=shift.gray_gap_s,
+        gb=shift.gray_broken_s||0, tot=gp+gs+gg+gb;
   const seg=(v,c)=> tot>0&&v>0 ? `<div style="width:${(v/tot*100).toFixed(1)}%;background:${c}">${fmtDur(v)}</div>`:'';
   document.getElementById('gray').innerHTML =
-    `<div class="gbar">${seg(gp,COLORS.power)}${seg(gs,COLORS.station)}${seg(gg,COLORS.gap)}${tot===0?'<div style="color:var(--muted);width:100%;background:transparent">אין זמן מנוטרל</div>':''}</div>
+    `<div class="gbar">${seg(gp,COLORS.power)}${seg(gs,COLORS.station)}${seg(gg,COLORS.gap)}${seg(gb,COLORS.broken)}${tot===0?'<div style="color:var(--muted);width:100%;background:transparent">אין זמן מנוטרל</div>':''}</div>
      <div class="legend">
        <span><i class="dot" style="background:${COLORS.power}"></i> חשמל ${fmtDur(gp)}</span>
        <span><i class="dot" style="background:${COLORS.station}"></i> עמדה ננטשה ${fmtDur(gs)}</span>
        <span><i class="dot" style="background:${COLORS.gap}"></i> חור-דאטה ${fmtDur(gg)}</span>
+       <span><i class="dot" style="background:${COLORS.broken}"></i> מושבתות 24ש׳+ ${fmtDur(gb)}</span>
      </div>`;
 }
 
@@ -283,11 +287,15 @@ function machineSegs(id, t0=T0, t1=T1){
 }
 function machineSegments(id, t0=T0, t1=T1){
   const span=Math.max(1,t1-t0);
+  const bs=(D.broken||{})[id];   // a broken machine's long stop turns gray on the strip
   // absolutely positioned: a period with no data stays visibly EMPTY on the track
-  return machineSegs(id,t0,t1).map(s=>
-    `<div class="tl-seg" style="position:absolute;top:0;height:100%;left:${(s.start-t0)/span*100}%;width:${(s.end-s.start)/span*100}%;background:${colorOf(s.state,s.reason)}"
-      title="${fmtClock(s.start)}–${fmtClock(s.end)} · ${STATE_HE[s.state]}${s.reason?(' ('+REASON_HE[s.reason]+')'):''}"></div>`
-  ).join('');
+  return machineSegs(id,t0,t1).map(s=>{
+    const isBrk = s.state==='stopped' && bs && s.start >= bs-1000;
+    const c = isBrk ? COLORS.broken : colorOf(s.state,s.reason);
+    const he = isBrk ? REASON_HE.broken : STATE_HE[s.state]+(s.reason?(' ('+REASON_HE[s.reason]+')'):'');
+    return `<div class="tl-seg" style="position:absolute;top:0;height:100%;left:${(s.start-t0)/span*100}%;width:${(s.end-s.start)/span*100}%;background:${c}"
+      title="${fmtClock(s.start)}–${fmtClock(s.end)} · ${he}"></div>`;
+  }).join('');
 }
 // longest uninterrupted run (worked without a fault) in the window
 function longestRun(id, t0=T0, t1=T1){

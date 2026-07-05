@@ -132,6 +132,21 @@ function fmtDur(s){
   return `${s}שנ׳`;
 }
 function clockOf(iso){ const m = /T(\d\d:\d\d:\d\d)/.exec(iso||''); return m ? m[1] : ''; }
+function dateOf(iso){ const d = iso ? new Date(iso) : null; return d ? `${d.getDate()}/${d.getMonth()+1}` : ''; }
+// state -> color+label; a machine broken >24h shows gray with the DATE it stopped
+function stateInfo(m){
+  if (m.reason === 'broken')
+    return { c: 'var(--gray)', label: `מושבתת מאז ${dateOf(m.since)}`, noDur: true };
+  if (m.state === 'running') return { c: 'var(--run)', label: 'עובדת' };
+  if (m.state === 'stopped') return { c: 'var(--stop)', label: 'עומדת' };
+  return { c: 'var(--gray)', label: 'מנוטרלת' };
+}
+// event color on strips: the broken machine's long stop is drawn gray, not red
+function evColor(id, e, startMs){
+  const bs = (D.broken || {})[id];
+  if (e.state === 'stopped' && bs && startMs >= bs - 1000) return 'var(--gray)';
+  return e.state === 'running' ? 'var(--run)' : e.state === 'stopped' ? 'var(--stop)' : '#94a3b8';
+}
 
 function stationStats(st){
   const ids = st === 'ALL' ? D.machines.map(m => m.conveyor_id) : (D.stations[st] || []);
@@ -179,12 +194,11 @@ function renderSheet(st){
   document.getElementById('sh-list').innerHTML = rows.map(m => {
     const b = bucket[m.conveyor_id];
     const stopsToday = b ? `${b.stop_count} עצירות במשמרת · עמדה סה״כ ${fmtDur(b.stop_s)}` : '';
-    const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
-    const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
+    const si = stateInfo(m);
     return `<div class="mrow" onclick="openMachine(${m.conveyor_id})">
-      <span class="dot" style="background:${c}"></span>
+      <span class="dot" style="background:${si.c}"></span>
       <span class="mid">#${m.conveyor_id}${st === 'ALL' ? ` <span style="color:var(--muted);font-weight:400;font-size:12px">${m.station}</span>` : ''}</span>
-      <span class="mtxt"><span class="mdur" style="color:${c}">${label} ${fmtDur(m.duration_s)}</span>
+      <span class="mtxt"><span class="mdur" style="color:${si.c}">${si.label}${si.noDur ? '' : ' ' + fmtDur(m.duration_s)}</span>
         <div class="msub">${stopsToday}</div></span>
       <span style="color:var(--muted)">‹</span>
     </div>`;
@@ -196,8 +210,8 @@ const LBL_HE = { morning: 'בוקר', afternoon: 'צהריים', night: 'ליל�
 function openMachine(id){
   const m = D.machines.find(x => x.conveyor_id === id);
   if (!m) return;
-  const c = m.state === 'running' ? 'var(--run)' : m.state === 'stopped' ? 'var(--stop)' : 'var(--gray)';
-  const label = m.state === 'running' ? 'עובדת' : m.state === 'stopped' ? 'עומדת' : 'מנוטרלת';
+  const si = stateInfo(m);
+  const c = si.c, label = si.label;
   document.getElementById('mc-title').textContent = `מכונה #${id} · עמדה ${m.station}`;
 
   const hist = D.shifts.map(s => {
@@ -212,8 +226,8 @@ function openMachine(id){
   }).join('');
 
   document.getElementById('mc-body').innerHTML = `
-    <div class="mstate" style="color:${c}">● ${label} ${fmtDur(m.duration_s)}</div>
-    <div class="msince">מאז ${(clockOf(m.since) || '').slice(0,5) || '—'}</div>
+    <div class="mstate" style="color:${c}">● ${label}${si.noDur ? '' : ' ' + fmtDur(m.duration_s)}</div>
+    <div class="msince">מאז ${m.reason === 'broken' ? dateOf(m.since) + ' ' : ''}${(clockOf(m.since) || '').slice(0,5) || '—'}</div>
     <div class="sec">24 השעות האחרונות:</div>
     <div class="tl" id="mc-tl"></div>
     <div class="tl-lbl"><span id="mc-t0"></span><span id="mc-t1"></span></div>
@@ -246,13 +260,12 @@ async function loadTimeline(id){
   const el = document.getElementById('mc-tl');
   if (!el) return;
   const span = t1 - t0;
-  const col = e => e.state === 'running' ? 'var(--run)' : e.state === 'stopped' ? 'var(--stop)' : '#94a3b8';
   let html = '';
   for (let i = 0; i < ev.length; i++) {
     const a = Math.max(t0, Date.parse(ev[i].time));
     const b = Math.min(t1, i + 1 < ev.length ? Date.parse(ev[i + 1].time) : t1);
     if (b <= a) continue;
-    html += `<div style="left:${(a - t0) / span * 100}%;width:${(b - a) / span * 100}%;background:${col(ev[i])}"></div>`;
+    html += `<div style="left:${(a - t0) / span * 100}%;width:${(b - a) / span * 100}%;background:${evColor(id, ev[i], a)}"></div>`;
   }
   el.innerHTML = html;
   document.getElementById('mc-t0').textContent = new Date(t0).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
@@ -356,7 +369,6 @@ async function renderReport(){
   const byM = {};
   ev.forEach(e => { (byM[e.conveyor_id] ||= []).push(e); });
   const span = t1 - t0;
-  const col = e => e.state === 'running' ? 'var(--run)' : e.state === 'stopped' ? 'var(--stop)' : '#94a3b8';
 
   ids.forEach(id => {
     const el = document.getElementById('rs-' + id);
@@ -376,7 +388,7 @@ async function renderReport(){
       const a = Math.max(t0, evs[i]._t != null ? evs[i]._t : Date.parse(evs[i].time));
       const b2 = Math.min(t1, i + 1 < evs.length ? Date.parse(evs[i + 1].time) : t1);
       if (b2 <= a) continue;
-      html += `<div style="left:${(a - t0) / span * 100}%;width:${(b2 - a) / span * 100}%;background:${col(evs[i])}"></div>`;
+      html += `<div style="left:${(a - t0) / span * 100}%;width:${(b2 - a) / span * 100}%;background:${evColor(id, evs[i], a)}"></div>`;
     }
     el.innerHTML = html;
   });
