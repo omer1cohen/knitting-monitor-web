@@ -13,6 +13,64 @@
     return '?';
   }
 
+  // ---- user settings (metric visibility + dated station mapping) ------------
+  // Stored in localStorage always; synced through the cloud table `app_config`
+  // when it exists (created once by running supabase/app_config.sql).
+  function lsGetSettings() {
+    try { return JSON.parse(localStorage.getItem('knitSettings') || 'null'); } catch (e) { return null; }
+  }
+  function lsSetSettings(v) {
+    try { localStorage.setItem('knitSettings', JSON.stringify(v)); } catch (e) {}
+  }
+  async function loadSettings(url, key, fetchFn) {
+    const f = fetchFn || fetch;
+    let cloud = null, cloudOk = false;
+    try {
+      const r = await f(url.replace(/\/$/, '') + '/rest/v1/app_config?key=eq.settings&select=value',
+        { headers: { apikey: key, Authorization: 'Bearer ' + key } });
+      if (r.ok) { cloudOk = true; const j = await r.json(); if (j.length) cloud = j[0].value; }
+    } catch (e) {}
+    const src = cloud || lsGetSettings() || {};
+    return { metrics: src.metrics || null, mapping: src.mapping || null, __cloud: cloudOk };
+  }
+  async function saveSettings(url, key, s, fetchFn) {
+    const f = fetchFn || fetch;
+    const clean = { metrics: s.metrics || null, mapping: s.mapping || null };
+    lsSetSettings(clean);
+    if (s.__cloud) {
+      try {
+        const r = await f(url.replace(/\/$/, '') + '/rest/v1/app_config', {
+          method: 'POST',
+          headers: { apikey: key, Authorization: 'Bearer ' + key,
+            'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+          body: JSON.stringify([{ key: 'settings', value: clean }]),
+        });
+        if (r.ok) return 'cloud';
+      } catch (e) {}
+    }
+    return 'local';
+  }
+  // mapping = [{from:'YYYY-MM-DD', stations:{A:[ids],...}}, ...] -- the period whose
+  // `from` is the latest one <= the asked date wins, so edits apply RETROACTIVELY
+  // to history and immediately to live, per period. No mapping -> machine_state's.
+  function stationResolver(mapping, fallbackStations) {
+    const fb = (cid) => stationOf(fallbackStations, cid);
+    if (!mapping || !mapping.length) return fb;
+    const lookup = [...mapping]
+      .sort((a, b) => (a.from < b.from ? -1 : 1))
+      .map(p => {
+        const m = {};
+        for (const st in (p.stations || {})) (p.stations[st] || []).forEach(id => { m[id] = st; });
+        return { from: p.from, map: m };
+      });
+    return (cid, dateStr) => {
+      let chosen = null;
+      for (const p of lookup) { if (!dateStr || p.from <= dateStr) chosen = p; }
+      if (!chosen) chosen = lookup[0];      // dates before the first period
+      return chosen.map[cid] || fb(cid);
+    };
+  }
+
   async function buildSnapshotFromSupabase(url, key, fetchFn, opts) {
     const f = fetchFn || fetch;
     const base = url.replace(/\/$/, '') + '/rest/v1';
@@ -32,6 +90,11 @@
       }
       return out;
     };
+
+    // settings (metric toggles + dated station mapping); tests may inject their own
+    const settings = (opts && opts.settings !== undefined)
+      ? (opts.settings || { metrics: null, mapping: null, __cloud: false })
+      : await loadSettings(url, key, fetchFn);
 
     const ms = await getAll('machine_state', 'select=*&order=conveyor_id');
     const sb = await getAll('shift_buckets', 'select=*');
@@ -63,13 +126,19 @@
 
     const generated_at = ms.reduce((a, m) => (m.updated_at > a ? m.updated_at : a),
       ms.length ? ms[0].updated_at : new Date().toISOString());
+    // the agent's own mapping (machine_state.station) is the fallback; the
+    // settings mapping (dated periods) overrides it -- retroactively per date
+    const msStations = {};
+    ms.forEach(m => { (msStations[m.station] = msStations[m.station] || []).push(m.conveyor_id); });
+    const stFor = stationResolver(settings && settings.mapping, msStations);
+    const today = String(generated_at).slice(0, 10);
     const stations = {};
-    ms.forEach(m => { (stations[m.station] = stations[m.station] || []).push(m.conveyor_id); });
+    ms.forEach(m => { const st = stFor(m.conveyor_id, today); (stations[st] = stations[st] || []).push(m.conveyor_id); });
 
     const machines = ms.map(m => {
       const isBroken = broken[m.conveyor_id] != null;
       return {
-        conveyor_id: m.conveyor_id, station: m.station,
+        conveyor_id: m.conveyor_id, station: stFor(m.conveyor_id, today),
         state: isBroken ? 'gray' : m.state, reason: isBroken ? 'broken' : m.reason,
         since: m.since, duration_s: durSec(m.since, m.updated_at),
       };
@@ -84,24 +153,31 @@
       rows.forEach(b => {
         const bBroken = b.gray_broken_s || 0;
         run += b.run_s; stop += b.stop_s; gp += b.gray_power_s; gs += b.gray_station_s; gg += b.gray_gap_s; gb += bBroken; stops += b.stop_count;
-        const st = stationOf(stations, b.conveyor_id);
+        const st = stFor(b.conveyor_id, sd);   // per-date: mapping edits are retroactive
         const grayAll = b.gray_power_s + b.gray_station_s + b.gray_gap_s + bBroken;
         const p = (per[st] ||= [0, 0, 0]); p[0] += b.run_s; p[1] += b.stop_s; p[2] += grayAll;
         const av = b.run_s + b.stop_s;
+        // util === null -> no available time at all: IGNORED in statistics
+        // (neither 100% nor 0%), shown as "—" in the UI.
+        // revs/rpm are null until the cloud has the revs column (stage A deploy).
         mach.push({ conveyor_id: b.conveyor_id, station: st, run_s: b.run_s, stop_s: b.stop_s,
           gray_s: grayAll, stop_count: b.stop_count,
-          stutter_count: b.stutter_count || 0, util: av > 0 ? b.run_s / av : 1 });
+          stutter_count: b.stutter_count || 0, util: av > 0 ? b.run_s / av : null,
+          revs: b.revs != null ? b.revs : null,
+          rpm: (b.revs != null && b.run_s > 0) ? b.revs / (b.run_s / 60) : null });
       });
       const av = run + stop; const per_station = {};
-      for (const s in per) { const v = per[s]; per_station[s] = { run_s: v[0], stop_s: v[1], gray_s: v[2], util: (v[0] + v[1]) > 0 ? v[0] / (v[0] + v[1]) : 1 }; }
+      for (const s in per) { const v = per[s]; per_station[s] = { run_s: v[0], stop_s: v[1], gray_s: v[2], util: (v[0] + v[1]) > 0 ? v[0] / (v[0] + v[1]) : null }; }
       return { shift_date: sd, shift_label: label, shift_name: name, run_s: run, stop_s: stop,
-        gray_power_s: gp, gray_station_s: gs, gray_gap_s: gg, gray_broken_s: gb, stops, util: av > 0 ? run / av : 1,
+        gray_power_s: gp, gray_station_s: gs, gray_gap_s: gg, gray_broken_s: gb, stops, util: av > 0 ? run / av : null,
         per_station, machines: mach.sort((a, b) => b.stop_s - a.stop_s) };
     }).sort((a, b) => a.shift_date < b.shift_date ? -1 : a.shift_date > b.shift_date ? 1 : order[a.shift_label] - order[b.shift_label]);
 
-    return { generated_at, stations, n_conveyors: ms.length, machines, shifts, events: ev, broken };
+    return { generated_at, stations, n_conveyors: ms.length, machines, shifts, events: ev, broken, settings };
   }
 
   root.buildSnapshotFromSupabase = buildSnapshotFromSupabase;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { buildSnapshotFromSupabase };
+  root.knitSettings = { load: loadSettings, save: saveSettings };
+  if (typeof module !== 'undefined' && module.exports)
+    module.exports = { buildSnapshotFromSupabase, loadSettings, saveSettings, stationResolver };
 })(typeof window !== 'undefined' ? window : globalThis);
